@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "Guided car finder that turns a confused buyer into a confident shortlist.",
-  "engines": {
-    "node": ">=18.18.0"
-  },
+"engines": {
+  "node": "20.x"
+},
   "scripts": {
     "dev": "next dev",
     "build": "next build",
