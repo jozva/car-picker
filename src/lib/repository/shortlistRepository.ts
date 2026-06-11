@@ -1,26 +1,40 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
+import { createClient, type VercelKV } from "@vercel/kv";
 import { z } from "zod";
 import type { SavedShortlist } from "../types";
 import { savedShortlistSchema } from "../schemas";
 import type { SaveShortlistInput } from "../schemas";
 
 /**
- * Lightweight file-based persistence for saved shortlists. The async interface
- * mirrors a DB-backed implementation so it can be swapped without touching
- * callers.
- *
- * NOTE: a local file is durable for local/single-instance runs only. On a
- * serverless/multi-instance deploy the filesystem is ephemeral and per-instance;
- * production would swap this module for a hosted DB (the seam makes it a
- * one-file change).
+ * Saved shortlists are persisted to Redis in production (Vercel KV or Upstash
+ * Redis integration) and to a local `.data/` file otherwise. The async
+ * interface mirrors a DB-backed implementation so callers stay unchanged.
  */
+const KV_KEY = "carpicker:shortlists";
+const kvUrl =
+  process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
+const kvToken =
+  process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
+const useKv = Boolean(kvUrl && kvToken);
+const kv: VercelKV | null = useKv
+  ? createClient({ url: kvUrl!, token: kvToken! })
+  : null;
 const DATA_DIR = path.join(process.cwd(), ".data");
 const STORE = path.join(DATA_DIR, "shortlists.json");
 const storeSchema = z.array(savedShortlistSchema);
 
+function parseStore(raw: unknown): SavedShortlist[] {
+  const parsed = storeSchema.safeParse(raw);
+  return parsed.success ? parsed.data : [];
+}
+
 async function readStore(): Promise<SavedShortlist[]> {
+  if (useKv) {
+    return parseStore(await kv!.get(KV_KEY));
+  }
+
   let raw: string;
   try {
     raw = await fs.readFile(STORE, "utf-8");
@@ -28,14 +42,17 @@ async function readStore(): Promise<SavedShortlist[]> {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
   }
-  // Validate data at rest; tolerate a corrupt/partial file by starting fresh.
-  const parsed = storeSchema.safeParse(JSON.parse(raw));
-  return parsed.success ? parsed.data : [];
+  return parseStore(JSON.parse(raw));
 }
 
 /** Atomic write: write to a temp file then rename, so a crash never leaves a
  *  half-written store. */
 async function writeStore(items: SavedShortlist[]): Promise<void> {
+  if (useKv) {
+    await kv!.set(KV_KEY, items);
+    return;
+  }
+
   await fs.mkdir(DATA_DIR, { recursive: true });
   const tmp = `${STORE}.${randomUUID()}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(items, null, 2), "utf-8");

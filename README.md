@@ -83,7 +83,13 @@ data/
 - Every API route returns one consistent envelope: `{ ok: true, data }` or `{ ok: false, error: { message, details? } }`.
 
 ### Persistence note
-Saved shortlists are written to a local `.data/` file (atomic write, with in-process write serialization). That's durable for local / single-instance runs. On a serverless or multi-instance deploy the filesystem is ephemeral and per-instance, so production would swap `shortlistRepository` for a hosted DB — the repository seam makes that a single-file change.
+Saved shortlists are written to a local `.data/` file in dev (atomic write, with in-process write serialization). On Vercel, attach a **Redis** store (Storage → Marketplace → Upstash Redis) — it injects `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`, which the repository picks up automatically. Legacy Vercel KV env vars (`KV_REST_API_URL` / `KV_REST_API_TOKEN`) are also supported.
+
+## Deploy to Vercel
+
+1. Push to GitHub and import the repo in [Vercel](https://vercel.com).
+2. In the project → **Storage** → **Marketplace** → install **Upstash Redis** and connect it to this project.
+3. Redeploy. Saving shortlists will persist to Redis instead of the read-only serverless filesystem.
 
 ## AI tools vs. manual
 
