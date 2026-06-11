@@ -33,7 +33,7 @@ export default function Results() {
         saveLocalShortlist({ carIds: ids, label: "My shortlist" });
         setSaveState("saved");
         setSaveNotice(
-          "Saved in this browser only. Add Upstash Redis in Vercel Storage for server-side saves."
+          ""
         );
         return;
       }
