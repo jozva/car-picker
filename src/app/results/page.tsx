@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ScoreBar } from "@/components/ScoreBar";
+import { saveLocalShortlist } from "@/lib/client/localShortlists";
 import type { Preferences, ScoredCar } from "@/lib/types";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -11,9 +12,11 @@ export default function Results() {
   const [results, setResults] = useState<ScoredCar[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
   async function saveShortlist(ids: string[]) {
     setSaveState("saving");
+    setSaveNotice(null);
     try {
       const res = await fetch("/api/shortlists", {
         method: "POST",
@@ -21,9 +24,25 @@ export default function Results() {
         body: JSON.stringify({ carIds: ids, label: "My shortlist" }),
       });
       const data = await res.json();
-      setSaveState(data.ok ? "saved" : "error");
-    } catch {
+      if (data.ok) {
+        setSaveState("saved");
+        return;
+      }
+
+      if (res.status === 503 || res.status === 500) {
+        saveLocalShortlist({ carIds: ids, label: "My shortlist" });
+        setSaveState("saved");
+        setSaveNotice(
+          "Saved in this browser only. Add Upstash Redis in Vercel Storage for server-side saves."
+        );
+        return;
+      }
+
       setSaveState("error");
+    } catch {
+      saveLocalShortlist({ carIds: ids, label: "My shortlist" });
+      setSaveState("saved");
+      setSaveNotice("Saved in this browser only.");
     }
   }
 
@@ -113,6 +132,9 @@ export default function Results() {
           </Link>
         </div>
       </div>
+      {saveNotice && (
+        <p className="mt-2 text-sm text-amber-700">{saveNotice}</p>
+      )}
       {saveState === "error" && (
         <p className="mt-2 text-sm text-red-600">
           Couldn&apos;t save the shortlist. Please try again.

@@ -1,30 +1,61 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  isLocalShortlistId,
+  listLocalShortlists,
+  removeLocalShortlist,
+} from "@/lib/client/localShortlists";
 import type { SavedShortlist } from "@/lib/types";
 
 export default function Saved() {
-  const [shortlists, setShortlists] = useState<SavedShortlist[] | null>(null);
+  const [serverShortlists, setServerShortlists] = useState<
+    SavedShortlist[] | null
+  >(null);
+  const [localShortlists, setLocalShortlists] = useState<SavedShortlist[]>([]);
   const [removingId, setRemovingId] = useState<string | null>(null);
 
   useEffect(() => {
+    setLocalShortlists(listLocalShortlists());
     fetch("/api/shortlists")
       .then((r) => r.json())
-      .then((d) => setShortlists(d.ok ? d.data.shortlists : []));
+      .then((d) => setServerShortlists(d.ok ? d.data.shortlists : []));
   }, []);
+
+  const shortlists = useMemo(() => {
+    const byId = new Map<string, SavedShortlist>();
+    for (const s of serverShortlists ?? []) byId.set(s.id, s);
+    for (const s of localShortlists) byId.set(s.id, s);
+    return [...byId.values()].sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt)
+    );
+  }, [serverShortlists, localShortlists]);
+
+  const hasLocalOnly = localShortlists.length > 0;
 
   async function remove(id: string) {
     setRemovingId(id);
-    const prev = shortlists;
-    // Optimistic removal; restore on failure.
-    setShortlists((cur) => cur?.filter((s) => s.id !== id) ?? cur);
+    const prevServer = serverShortlists;
+    const prevLocal = localShortlists;
+
+    setServerShortlists((cur) => cur?.filter((s) => s.id !== id) ?? cur);
+    setLocalShortlists((cur) => cur.filter((s) => s.id !== id));
+
     try {
+      if (isLocalShortlistId(id)) {
+        if (!removeLocalShortlist(id)) {
+          setLocalShortlists(prevLocal);
+        }
+        return;
+      }
+
       const res = await fetch(`/api/shortlists/${id}`, { method: "DELETE" });
       const data = await res.json();
-      if (!data.ok) setShortlists(prev ?? null);
+      if (!data.ok) setServerShortlists(prevServer ?? null);
     } catch {
-      setShortlists(prev ?? null);
+      setServerShortlists(prevServer ?? null);
+      setLocalShortlists(prevLocal);
     } finally {
       setRemovingId(null);
     }
@@ -34,10 +65,12 @@ export default function Saved() {
     <div>
       <h1 className="text-2xl font-bold text-ink">Saved shortlists</h1>
       <p className="mt-1 text-slate-600">
-        Shortlists you saved are stored on the server and listed here.
+        Shortlists you saved are listed here.
+        {hasLocalOnly &&
+          " Some are stored in this browser only until Redis is connected on Vercel."}
       </p>
 
-      {!shortlists ? (
+      {!serverShortlists ? (
         <p className="mt-8 text-center text-slate-500">Loading…</p>
       ) : shortlists.length === 0 ? (
         <div className="mt-8 rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center">
@@ -61,6 +94,7 @@ export default function Saved() {
                 <p className="text-sm text-slate-500">
                   {s.carIds.length} cars · saved{" "}
                   {new Date(s.createdAt).toLocaleDateString()}
+                  {isLocalShortlistId(s.id) && " · this browser only"}
                 </p>
               </div>
               <div className="flex items-center gap-2">

@@ -3,9 +3,11 @@ import path from "path";
 import { randomUUID } from "crypto";
 import { createClient, type VercelKV } from "@vercel/kv";
 import { z } from "zod";
+import { ApiError } from "../api/response";
 import type { SavedShortlist } from "../types";
 import { savedShortlistSchema } from "../schemas";
 import type { SaveShortlistInput } from "../schemas";
+import { getShortlistStorageMode } from "./shortlistStorage";
 
 /**
  * Saved shortlists are persisted to Redis in production (Vercel KV or Upstash
@@ -51,6 +53,13 @@ async function writeStore(items: SavedShortlist[]): Promise<void> {
   if (useKv) {
     await kv!.set(KV_KEY, items);
     return;
+  }
+
+  if (getShortlistStorageMode() === "unavailable") {
+    throw new ApiError(
+      503,
+      "Server storage is not configured. Connect Upstash Redis in Vercel Storage."
+    );
   }
 
   await fs.mkdir(DATA_DIR, { recursive: true });
